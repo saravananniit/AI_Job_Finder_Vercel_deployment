@@ -1,4 +1,12 @@
 {
-  "functions": { "api/index.py": { "maxDuration": 60 } },
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index" }]
+  "builds": [
+    {
+      "src": "main.py",
+      "use": "@vercel/python",
+      "config": { "includeFiles": ["public/**"] }
+    }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "main.py" }
+  ]
 }
