@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Job Finder - City Based web search</title>
+<style>
+  :root {
+    --bg: #f3f5f7;
+    --panel: #ffffff;
+    --ink: #1c2733;
+    --muted: #5d6b7a;
+    --line: #d5dce3;
+    --brand: #1f3a5f;
+    --accent: #e08a00;
+    --err: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { margin: 0 0 6px; font-size: 1.9rem; letter-spacing: -0.01em; color: var(--brand); }
+  .sub { margin: 0 0 28px; color: var(--muted); max-width: 60ch; }
+  form { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px; display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
+  .full { grid-column: 1 / -1; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; font-size: .95rem; }
+  .hint { font-weight: 400; color: var(--muted); font-size: .85rem; }
+  input, select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: #fff; color: var(--ink); }
+  input:focus, select:focus, button:focus-visible { outline: 3px solid rgba(224,138,0,.45); outline-offset: 1px; border-color: var(--accent); }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 6px; padding: 12px 20px; font-weight: 600; }
+  .primary { background: var(--brand); color: #fff; }
+  .primary:disabled { opacity: .6; cursor: progress; }
+  .secondary { background: var(--accent); color: #1c1200; }
+  #status { margin: 20px 0 0; min-height: 1.5em; color: var(--muted); }
+  #status.error { color: var(--err); font-weight: 600; }
+  #results { margin-top: 28px; }
+  .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .bar h2 { margin: 0; font-size: 1.15rem; }
+  .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #eaeff4; white-space: nowrap; position: sticky; top: 0; }
+  td.desc { min-width: 280px; max-width: 420px; color: var(--muted); }
+  a { color: #0b57d0; }
+  [hidden] { display: none !important; }
+  @media (max-width: 640px) { form { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>AI Job Finder - City Based web search</h1>
+  <p class="sub">Search multiple job roles in a city, extract job details from web pages, remove duplicates and download in an Excel file.</p>
+
+  <form id="form">
+    <div class="full">
+      <label for="roles">Job Roles <span class="hint">(separate several roles with commas)</span></label>
+      <input id="roles" required placeholder="Python Developer, Data Analyst, QA Engineer">
+    </div>
+    <div>
+      <label for="city">City</label>
+      <input id="city" required placeholder="Chennai">
+    </div>
+    <div>
+      <label for="posted">Posted within</label>
+      <select id="posted" required>
+        <option value="" disabled selected>Select an option</option>
+        <option>Anytime</option>
+        <option>30 days</option>
+        <option>14 days</option>
+        <option>7 days</option>
+        <option>3 days</option>
+        <option>24 hours</option>
+      </select>
+    </div>
+    <div>
+      <label for="exp">Experience</label>
+      <input id="exp" value="0-3 years">
+    </div>
+    <div>
+      <label for="max">Maximum Results</label>
+      <input id="max" type="number" min="1" max="100" value="25">
+    </div>
+    <div class="full">
+      <label for="key">Serper API key <span class="hint">(sent only with this request, never stored)</span></label>
+      <input id="key" type="password" required autocomplete="off" placeholder="Paste your Serper API key">
+    </div>
+    <div class="full">
+      <button class="primary" id="submit" type="submit">Find Jobs</button>
+    </div>
+  </form>
+
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <section id="results" hidden>
+    <div class="bar">
+      <h2 id="count"></h2>
+      <button class="secondary" id="download" type="button">Download Excel</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Job Title</th><th>Company</th><th>Location</th><th>Experience</th><th>Qualification</th>
+        <th>Posted Date</th><th>Description</th><th>Source</th><th>Apply Link</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const COLS = ["Job Title","Company","Location","Experience","Qualification","Posted Date","Description","Source","Apply Link"];
+let jobs = [];
+
+function setStatus(msg, isError = false) {
+  const s = $("status");
+  s.textContent = msg;
+  s.className = isError ? "error" : "";
+}
+
+async function readError(res) {
+  try { const j = await res.json(); return j.detail || JSON.stringify(j); }
+  catch { return res.status === 504 ? "The search timed out. Try fewer roles or a lower Maximum Results." : `Request failed (${res.status}).`; }
+}
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("submit").disabled = true;
+  $("results").hidden = true;
+  setStatus("Searching and reading job pages. This can take up to a minute...");
+  try {
+    const res = await fetch("/api/find-jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        roles: $("roles").value,
+        city: $("city").value,
+        posted_within: $("posted").value,
+        experience: $("exp").value || "0-3 years",
+        max_results: parseInt($("max").value, 10) || 25,
+        serper_api_key: $("key").value,
+      }),
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    const data = await res.json();
+    jobs = data.jobs;
+    if (!jobs.length) { setStatus("No jobs found. Try different roles, a wider time range, or another city.", true); return; }
+    render(data);
+    setStatus(data.scraped ? "" : "Job pages were not scraped because FIRECRAWL_API_KEY is not set on the server, so details come from search snippets.");
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    $("submit").disabled = false;
+  }
+});
+
+function render(data) {
+  $("count").textContent = `${data.count} unique job${data.count === 1 ? "" : "s"} found`;
+  const tbody = $("rows");
+  tbody.replaceChildren();
+  for (const j of jobs) {
+    const tr = document.createElement("tr");
+    for (const c of COLS) {
+      const td = document.createElement("td");
+      if (c === "Apply Link") {
+        const a = document.createElement("a");
+        a.href = j[c]; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = "Apply";
+        td.appendChild(a);
+      } else {
+        td.textContent = j[c] || "";
+        if (c === "Description") td.className = "desc";
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  $("results").hidden = false;
+}
+
+$("download").addEventListener("click", async () => {
+  $("download").disabled = true;
+  try {
+    const res = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobs }),
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = "jobs.xlsx";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    $("download").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

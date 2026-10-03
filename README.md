@@ -1,0 +1,1 @@
+uv run uvicorn api.index:app --reload --port 8000
